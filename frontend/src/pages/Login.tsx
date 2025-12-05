@@ -33,12 +33,21 @@ export default function Login({ setToken }: LoginProps) {
     try {
       setLoading(true)
       setError('')
-      const res = await api.post('/auth/login', { iin, password })
-      localStorage.setItem('token', res.data.token)
-      setToken(res.data.token)
-      navigate('/')
+      
+      const params = new URLSearchParams();
+      params.append('username', iin);
+      params.append('password', password);
+
+      const res = await api.post('/auth/login', params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+
+      const token = res.data.access_token;
+      localStorage.setItem('token', token);
+      setToken(token);
+      navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Ошибка входа')
+      setError(err.response?.data?.detail || 'Ошибка входа');
     } finally {
       setLoading(false)
     }

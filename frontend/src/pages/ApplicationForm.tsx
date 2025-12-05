@@ -43,6 +43,22 @@ interface FormData {
   state?: string
 }
 
+const stateLabels: Record<string, string> = {
+  draft: 'Черновик',
+  submitted: 'Подана',
+  pre_approved: 'Предодобрена',
+  bank_discussed: 'После банка',
+  final_approved: 'Окончательно одобрена'
+};
+
+const stateColors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
+  draft: 'default',
+  submitted: 'primary',
+  pre_approved: 'secondary',
+  bank_discussed: 'warning',
+  final_approved: 'success'
+};
+
 export default function ApplicationForm() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -104,9 +120,23 @@ export default function ApplicationForm() {
 
   const handleSubmit = async () => {
     try {
-      await api.post(`/applications/${id}/state/submitted`)
-      navigate('/')
-    } catch { setError(t('error_submit')) }
+      let nextState = '';
+      if (form.state === 'draft') {
+        nextState = 'pre_approved';
+      } else if (form.state === 'pre_approved') {
+        nextState = 'final_approved';
+      }
+
+      if (!nextState) {
+        setError('Нет доступного действия для этого статуса.');
+        return;
+      }
+
+      await api.post(`/applications/${id}/state/${nextState}`);
+      navigate('/');
+    } catch {
+      setError(t('error_submit'));
+    }
   }
 
   if (loading) return <><Header /><Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}><CircularProgress size={80} /></Box></>
@@ -119,7 +149,7 @@ export default function ApplicationForm() {
           {isEdit ? t('edit_application', { number: form.number || id || '' }) : t('create_application')}
         </Typography>
 
-        {form.state && <Chip label={form.state === 'draft' ? t('draft') : t('submitted')} color={form.state === 'draft' ? 'default' : 'primary'} sx={{ mb: 3 }} />}
+        {form.state && <Chip label={stateLabels[form.state] || form.state} color={stateColors[form.state] || 'default'} sx={{ mb: 3 }} />}
 
         {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>{error}</Alert>}
 
@@ -185,10 +215,14 @@ export default function ApplicationForm() {
 
               <Box mt={6} display="flex" gap={2} justifyContent="flex-end">
                 <Button variant="outlined" size="large" onClick={() => navigate('/')}>{t('cancel')}</Button>
-                <Button variant="contained" size="large" color="success" onClick={handleSave} disabled={saving}>
+                <Button variant="contained" size="large" color="success" onClick={handleSave} disabled={saving || (isEdit && form.state !== 'draft')}>
                   {saving ? t('saving') : t('save_draft')}
                 </Button>
-                {isEdit && <Button variant="contained" size="large" color="primary" onClick={handleSubmit}>{t('submit')}</Button>}
+                {isEdit && (form.state === 'draft' || form.state === 'pre_approved') && (
+                  <Button variant="contained" size="large" color="primary" onClick={handleSubmit}>
+                    {t('submit')}
+                  </Button>
+                )}
               </Box>
             </>
           ) : (

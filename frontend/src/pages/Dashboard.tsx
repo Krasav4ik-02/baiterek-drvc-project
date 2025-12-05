@@ -1,133 +1,153 @@
-import { useEffect, useState } from 'react'
-import { Tabs, Tab, Box, Button, Typography, Paper, Chip } from '@mui/material'
-import { Download as DownloadIcon } from '@mui/icons-material'
-import api from '../services/api'
-import Header from '../components/Header'
-import { useNavigate } from 'react-router-dom'
-import { useTranslation } from '../i18n'
-
-interface Application {
-  id: number
-  number: number
-  need_type: string
-  state: string
-  created_at: string
-}
-
-const stateColors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
-  draft: 'default',
-  submitted: 'primary',
-  pre_approved: 'secondary',
-  bank_discussed: 'warning',
-  final_approved: 'success'
-}
+import { useEffect, useState } from 'react';
+import { 
+  Box, Button, Typography, Paper, CircularProgress, Alert, 
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField
+} from '@mui/material';
+import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from '../i18n/index.tsx';
+import Header from '../components/Header';
+import { getSmetas, deleteSmeta, createSmeta } from '../services/api';
+import type { Smeta } from '../services/api';
 
 export default function Dashboard() {
-  const { t } = useTranslation()
-  const [tab, setTab] = useState(0)
-  const [applications, setApplications] = useState<Application[]>([])
-  const navigate = useNavigate()
-
-  const states = ['draft', 'submitted', 'pre_approved', 'bank_discussed', 'final_approved']
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [smetas, setSmetas] = useState<Smeta[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   
-  const stateLabels: Record<string, string> = {
-    draft: t('draft'),
-    submitted: t('submitted'),
-    pre_approved: t('pre_approved'),
-    bank_discussed: 'После банка', // TODO: Add translation
-    final_approved: 'Одобренные' // TODO: Add translation
-  }
+  const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newSmetaYear, setNewSmetaYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
-    loadApplications()
-  }, [tab, t]) // Add t to dependency array to re-render on lang change
+    loadSmetas();
+  }, []);
 
-  const loadApplications = async () => {
+  const loadSmetas = async () => {
     try {
-      const res = await api.get('/applications', { params: { state: states[tab] || undefined } })
-      setApplications(res.data)
+      setLoading(true);
+      const data = await getSmetas();
+      setSmetas(data);
     } catch (err) {
-      console.error(err)
+      setError('Не удалось загрузить сметы закупок.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  const downloadDocx = async (id: number) => {
+  const handleOpenCreateDialog = () => {
+    setNewSmetaYear(new Date().getFullYear());
+    setCreateDialogOpen(true);
+  };
+
+  const handleCloseCreateDialog = () => {
+    setCreateDialogOpen(false);
+  };
+
+  const handleCreateSmeta = async () => {
     try {
-      const res = await api.get(`/applications/${id}/download-docx`, { responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([res.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `Заявка_${id}.docx`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
+      const newSmeta = await createSmeta({ year: newSmetaYear });
+      handleCloseCreateDialog();
+      navigate(`/plans/${newSmeta.id}`);
     } catch (err) {
-      alert('Ошибка скачивания')
+      setError('Ошибка при создании сметы.');
     }
-  }
+  };
+
+  const handleDelete = async (smetaId: number) => {
+    if (window.confirm('Вы уверены, что хотите удалить эту смету?')) {
+      try {
+        await deleteSmeta(smetaId);
+        setSmetas(smetas.filter(s => s.id !== smetaId));
+      } catch (err) {
+        setError('Ошибка при удалении сметы.');
+      }
+    }
+  };
 
   return (
     <>
       <Header />
-      <Box sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-          <Typography variant="h5">{t('my_applications')}</Typography>
+      <Box sx={{ p: 4, maxWidth: 'lg', mx: 'auto' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" fontWeight="bold">{t('dashboard_title')}</Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleOpenCreateDialog}
+          >
+            {t('create_plan')}
+          </Button>
         </Box>
 
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-          <Tab label={t('draft')} />
-          <Tab label={t('submitted_tab')} />
-          <Tab label={t('pre_approved')} />
-          <Tab label="После банка" />
-          <Tab label="Одобренные" />
-        </Tabs>
+        {loading && <CircularProgress />}
+        {error && <Alert severity="error">{error}</Alert>}
 
-        <Box>
-          {applications.length === 0 ? (
-            <Paper sx={{ p: 4, textAlign: 'center' }}>
-              <Typography>{t('no_applications_in_status')}</Typography>
-            </Paper>
-          ) : (
-            applications.map(app => (
-              <Paper key={app.id} sx={{ p: 3, mb: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="h6">Заявка №{app.number}</Typography>
-                    <Typography>Вид: {app.need_type || '—'}</Typography>
-                    <Typography color="text.secondary">
-                      Создано: {new Date(app.created_at).toLocaleDateString('ru-RU')}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <Chip
-                      label={stateLabels[app.state]}
-                      color={stateColors[app.state]}
-                      size="small"
-                    />
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={() => navigate(`/application/${app.id}`)}
-                    >
-                      Открыть
-                    </Button>
-                    {(app.state === 'pre_approved' || app.state === 'bank_discussed') && (
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<DownloadIcon />}
-                        onClick={() => downloadDocx(app.id)}
-                      >
-                        DOCX
-                      </Button>
-                    )}
-                  </Box>
-                </Box>
-              </Paper>
-            ))
-          )}
-        </Box>
+        {!loading && !error && (
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>{t('smeta_id')}</TableCell>
+                  <TableCell>{t('smeta_year')}</TableCell>
+                  <TableCell>{t('smeta_amount')}</TableCell>
+                  <TableCell align="right">{t('actions')}</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {smetas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center">
+                      <Typography color="text.secondary" sx={{ p: 3 }}>{t('no_plans_found')}</Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  smetas.map(smeta => (
+                    <TableRow key={smeta.id} hover>
+                      <TableCell>Смета №{smeta.id}</TableCell>
+                      <TableCell>{smeta.year}</TableCell>
+                      <TableCell>
+                        {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT' }).format(smeta.total_amount)}
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" onClick={() => navigate(`/plans/${smeta.id}`)}>
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => handleDelete(smeta.id)}>
+                          <DeleteIcon />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Box>
+
+      <Dialog open={isCreateDialogOpen} onClose={handleCloseCreateDialog}>
+        <DialogTitle>Создать новую смету</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label={t('smeta_year')}
+            type="number"
+            fullWidth
+            variant="standard"
+            value={newSmetaYear}
+            onChange={(e) => setNewSmetaYear(Number(e.target.value))}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCreateDialog}>{t('cancel')}</Button>
+          <Button onClick={handleCreateSmeta}>{t('create_plan')}</Button>
+        </DialogActions>
+      </Dialog>
     </>
-  )
+  );
 }

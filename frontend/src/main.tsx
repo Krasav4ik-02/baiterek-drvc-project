@@ -4,7 +4,7 @@ import App from './App.tsx'
 import './index.css'
 import { ThemeProvider, createTheme } from '@mui/material/styles'
 import { CssBaseline } from '@mui/material'
-import { LangProvider } from './i18n'
+import { LangProvider } from './i18n/index.tsx'
 
 const theme = createTheme({
   palette: {

@@ -25,11 +25,8 @@ export default function Header() {
             </Select>
           </FormControl>
 
-          <Button color="inherit" onClick={() => navigate('/application/new')}>
-            {t('new_application')}
-          </Button>
           <Button color="inherit" onClick={() => navigate('/')}>
-            {t('my_applications')}
+            {t('my_procurement_plans')}
           </Button>
         </Box>
       </Toolbar>

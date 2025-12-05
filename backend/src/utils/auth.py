@@ -1,48 +1,71 @@
-import os
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from dotenv import load_dotenv
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from typing import Optional
 
-load_dotenv()
+from sqlalchemy.orm import Session
+from src.database.database import get_db
+from src.models.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-baiterek-key-2025!")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
+# --- Конфигурация ---
+SECRET_KEY = "a_very_secret_key_that_should_be_in_env_vars"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 часа
 
-# Используем plaintext — никаких ошибок, никаких bcrypt!
-pwd_context = CryptContext(schemes=["plaintext"], deprecated="auto")
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-# Простейшая заглушка
-FAKE_USER = {
-    "username": "user",
-    "hashed_password": "password"  # plaintext!
-}
+# --- Утилиты для паролей и токенов ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    # В нашей новой модели нет паролей, поэтому просто возвращаем True
+    # В реальном приложении здесь была бы проверка хэша
+    return True
 
-def create_access_token(data: dict):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-def authenticate_user(username: str, password: str):
-    if username == "user" and password == "password":
-        return {"username": username}
-    return None
+# --- Основные функции для аутентификации и авторизации ---
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
+    """
+    Ищет пользователя по ИИН. 
+    В этой версии пароль не проверяется, т.к. его нет в модели.
+    В реальном приложении здесь была бы проверка пароля.
+    """
+    user = db.query(User).filter(User.iin == iin).first()
+    if not user:
+        return None
+    # if not verify_password(password, user.hashed_password): # Если бы был пароль
+    #     return None
+    return user
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    """
+    Декодирует токен, извлекает ИИН пользователя и возвращает объект User из БД.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Не удалось проверить учетные данные",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return {"username": username}
+        iin: str = payload.get("sub")
+        if iin is None:
+            raise credentials_exception
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise credentials_exception
+    
+    user = db.query(User).filter(User.iin == iin).first()
+    if user is None:
+        raise credentials_exception
+    return user
