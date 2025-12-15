@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
-from src.models.models import NeedType
+from ..models.models import NeedType, PlanStatus
 from . import lookup as lookup_schema
 
 # ========= Схемы для Позиций Сметы (PlanItem) =========
@@ -75,8 +75,15 @@ class ProcurementPlanUpdate(ProcurementPlanBase):
 class ProcurementPlan(ProcurementPlanBase):
     id: int
     total_amount: Decimal
-    ktp_amount: Optional[Decimal] = 0 # Новое поле
-    non_ktp_amount: Optional[Decimal] = 0 # Новое поле
+    status: PlanStatus
+    pre_approved_total_amount: Optional[Decimal] = None
+    pre_approved_ktp_percentage: Optional[Decimal] = None
+    pre_approved_import_percentage: Optional[Decimal] = None
+    final_total_amount: Optional[Decimal] = None
+    final_ktp_percentage: Optional[Decimal] = None
+    final_import_percentage: Optional[Decimal] = None
+    ktp_amount: Optional[Decimal] = 0
+    non_ktp_amount: Optional[Decimal] = 0
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -84,6 +91,9 @@ class ProcurementPlan(ProcurementPlanBase):
 
     class Config:
         from_attributes = True
+
+class ProcurementPlanStatusUpdate(BaseModel):
+    status: PlanStatus
 
 # --- Схемы для ответа эндпоинта редактирования ---
 

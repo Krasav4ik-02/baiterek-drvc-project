@@ -4,8 +4,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from src.database.base import Base
+from ..database.base import Base
 import enum
+
+
+class PlanStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    PRE_APPROVED = "PRE_APPROVED"
+    APPROVED = "APPROVED"
 
 
 class NeedType(enum.Enum):
@@ -29,50 +35,92 @@ class User(Base):
 
 class ProcurementPlan(Base):
     __tablename__ = "procurement_plans"
+
     id = Column(Integer, primary_key=True)
     year = Column(SmallInteger, nullable=False)
-    total_amount = Column(Numeric(20, 2), default=0)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    creator = relationship("User", back_populates="plans")
-    items = relationship("PlanItem", back_populates="plan", cascade="all, delete-orphan")
 
-class PlanItem(Base):
-    __tablename__ = "plan_items"
+    creator = relationship("User")
+    versions = relationship(
+        "ProcurementPlanVersion",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="ProcurementPlanVersion.version_number"
+    )
+
+class ProcurementPlanVersion(Base):
+    __tablename__ = "procurement_plan_versions"
+
     id = Column(Integer, primary_key=True)
-    plan_id = Column(Integer, ForeignKey("procurement_plans.id", ondelete="CASCADE"), nullable=False)
+    plan_id = Column(Integer, ForeignKey("procurement_plans.id", ondelete="CASCADE"))
+    version_number = Column(Integer, nullable=False)
+
+    status = Column(Enum(PlanStatus), nullable=False)
+
+    total_amount = Column(Numeric(20, 2), default=0)
+    ktp_percentage = Column(Numeric(5, 2))
+    import_percentage = Column(Numeric(5, 2))
+
+    is_active = Column(Boolean, default=True)  # текущая версия
+
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    plan = relationship("ProcurementPlan", back_populates="versions")
+    items = relationship(
+        "PlanItemVersion",
+        back_populates="version",
+        cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("plan_id", "version_number", name="uq_plan_version"),
+    )
+    creator = relationship("User")
+
+class PlanItemVersion(Base):
+    __tablename__ = "plan_item_versions"
+
+    id = Column(Integer, primary_key=True)
+    version_id = Column(
+        Integer,
+        ForeignKey("procurement_plan_versions.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
     item_number = Column(Integer, nullable=False)
     need_type = Column(Enum(NeedType), nullable=False)
-    trucode = Column(String(35), ForeignKey('enstru.code'), nullable=False)
-    additional_specs = Column(Text)
-    unit_id = Column(Integer, ForeignKey('mkei.id'), nullable=True)
+
+    trucode = Column(String(35), ForeignKey("enstru.code"), nullable=False)
+    unit_id = Column(Integer, ForeignKey("mkei.id"))
+    expense_item_id = Column(Integer, ForeignKey("cost_items.id"), nullable=False)
+    funding_source_id = Column(Integer, ForeignKey("source_funding.id"), nullable=False)
+
+    agsk_id = Column(String(50), ForeignKey("agsk.code"))
+    kato_purchase_id = Column(Integer, ForeignKey("kato.id"))
+    kato_delivery_id = Column(Integer, ForeignKey("kato.id"))
+
     quantity = Column(Numeric(12, 3), nullable=False)
     price_per_unit = Column(Numeric(18, 2), nullable=False)
     total_amount = Column(Numeric(18, 2), nullable=False)
-    expense_item_id = Column(Integer, ForeignKey('cost_items.id'), nullable=False)
-    funding_source_id = Column(Integer, ForeignKey('source_funding.id'), nullable=False)
-    agsk_id = Column(String(50), ForeignKey('agsk.code'), nullable=True)
-    kato_purchase_id = Column(Integer, ForeignKey('kato.id'), nullable=True)
-    kato_delivery_id = Column(Integer, ForeignKey('kato.id'), nullable=True)
+
     is_ktp = Column(Boolean, default=False)
     is_resident = Column(Boolean, default=False)
-    ktp_applicable = Column(Boolean, default=False)
-    created_by = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    plan = relationship("ProcurementPlan", back_populates="items")
-    creator = relationship("User")
-    enstru = relationship("Enstru", foreign_keys=[trucode], primaryjoin="PlanItem.trucode == Enstru.code")
-    unit = relationship("Mkei", foreign_keys=[unit_id])
-    expense_item = relationship("Cost_Item", foreign_keys=[expense_item_id])
-    funding_source = relationship("Source_Funding", foreign_keys=[funding_source_id])
-    agsk = relationship("Agsk", foreign_keys=[agsk_id], primaryjoin="PlanItem.agsk_id == Agsk.code")
+    version = relationship("ProcurementPlanVersion", back_populates="items")
+    enstru = relationship("Enstru")
+    unit = relationship("Mkei")
+    expense_item = relationship("Cost_Item")
+    funding_source = relationship("Source_Funding")
+    agsk = relationship("Agsk")
     kato_purchase = relationship("Kato", foreign_keys=[kato_purchase_id])
     kato_delivery = relationship("Kato", foreign_keys=[kato_delivery_id])
 
-    __table_args__ = (UniqueConstraint("plan_id", "item_number", name="uq_plan_item_number"),)
+    __table_args__ = (
+        UniqueConstraint("version_id", "item_number", name="uq_version_item"),
+    )
+
 
 class Mkei(Base):
     __tablename__ = "mkei"
@@ -84,6 +132,7 @@ class Mkei(Base):
 class Kato(Base):
     __tablename__ = "kato"
     id = Column(Integer, primary_key=True)
+    parent_id = Column(Integer)
     code = Column(String(20), unique=True, nullable=False)
     name_kz = Column(Text, nullable=False)
     name_ru = Column(Text, nullable=False)

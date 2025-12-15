@@ -54,6 +54,10 @@ const translations = {
     is_ktp_label: 'Признак КТП',
     ktp_applicable_label: 'Применима ли закупка у КТП',
     is_resident_label: 'Резидентство РК',
+    // StatusChip
+    status_draft: 'Черновик',
+    status_pre_approved: 'Предварительно утвержденный',
+    status_approved: 'Утвержденный',
   },
   kk: {
     // General
@@ -105,6 +109,10 @@ const translations = {
     is_ktp_label: 'КТП белгісі',
     ktp_applicable_label: 'КТП-дан сатып алу қолданыла ма',
     is_resident_label: 'ҚР резиденттігі',
+     // StatusChip
+    status_draft: 'Жобалдық',
+    status_pre_approved: 'Алдын ала бекітілген',
+    status_approved: 'Бекітілген',
   },
 };
 

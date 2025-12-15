@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 
-from src.database.database import get_db
-from src.schemas import lookup as lookup_schema
-from src.models import models
+from ..database.database import get_db
+from ..schemas import lookup as lookup_schema
+from ..models import models
 
 router = APIRouter(
     prefix="/lookups",
@@ -39,7 +39,9 @@ def get_agsk_list(q: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Agsk)
     if q:
         search_term = f"%{q}%"
-        query = query.filter(or_(models.Agsk.code.ilike(search_term), models.Agsk.name_ru.ilike(search_term)))
+        query = query.filter(or_(models.Agsk.group.ilike(search_term),
+                                 models.Agsk.code.ilike(search_term),
+                                 models.Agsk.name_ru.ilike(search_term)))
     return query.limit(50).all()
 
 @router.get("/cost-items", response_model=List[lookup_schema.CostItem])
@@ -47,7 +49,8 @@ def get_cost_item_list(q: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Cost_Item)
     if q:
         search_term = f"%{q}%"
-        query = query.filter(or_(models.Cost_Item.name_ru.ilike(search_term), models.Cost_Item.name_kz.ilike(search_term)))
+        query = query.filter(or_(models.Cost_Item.name_ru.ilike(search_term),
+                                 models.Cost_Item.name_kz.ilike(search_term)))
     return query.limit(50).all()
 
 @router.get("/source-funding", response_model=List[lookup_schema.SourceFunding])

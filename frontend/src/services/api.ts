@@ -21,25 +21,40 @@ api.interceptors.response.use(
 
 // --- Типы Справочников ---
 export interface Mkei { id: number; code: string; name_ru: string; name_kz: string; }
-export interface Kato { id: number; code: string; name_ru: string; name_kz: string; }
-export interface Agsk { id: number; code: string; name_ru: string; }
+export interface Kato { id: number; parent_id: number | null; code: string; name_ru: string; name_kz: string; has_children: boolean; }
+export interface Agsk { id: number; group: string; code: string; name_ru: string; }
 export interface CostItem { id: number; name_ru: string; name_kz: string; }
 export interface SourceFunding { id: number; name_ru: string; name_kz: string; }
 export interface Enstru { id: number; code: string; name_ru: string; name_kz: string; type_ru: string; specs_ru?: string; }
 
 // --- Основные Типы ---
 export type NeedType = "Товар" | "Работа" | "Услуга";
+export enum PlanStatus {
+  DRAFT = "DRAFT",
+  PRE_APPROVED = "PRE_APPROVED",
+  APPROVED = "APPROVED",
+}
 
 export interface Smeta {
   id: number;
   year: number;
   total_amount: number;
-  ktp_amount?: number; // Новое поле
-  non_ktp_amount?: number; // Новое поле
+  status: PlanStatus;
+  
+  pre_approved_total_amount?: number;
+  pre_approved_ktp_percentage?: number;
+  pre_approved_import_percentage?: number;
+
+  final_total_amount?: number;
+  final_ktp_percentage?: number;
+  final_import_percentage?: number;
+
+  ktp_amount?: number;
+  non_ktp_amount?: number;
+  
   items: SmetaItem[];
 }
 
-// Схема для чтения: содержит вложенные объекты
 export interface SmetaItem {
   id: number;
   plan_id: number;
@@ -62,7 +77,6 @@ export interface SmetaItem {
   kato_delivery?: Kato;
 }
 
-// Схема для создания/обновления: содержит ID/коды
 export interface SmetaItemPayload {
   trucode: string;
   unit_id?: number;
@@ -86,6 +100,9 @@ export interface SmetaItemEditData {
 // --- API для Справочников ---
 export const getMkei = (q?: string): Promise<Mkei[]> => api.get('/lookups/mkei', { params: { q } }).then(res => res.data);
 export const getKato = (q?: string): Promise<Kato[]> => api.get('/lookups/kato', { params: { q } }).then(res => res.data);
+export const getKatoChildren = (parent_id?: number): Promise<Kato[]> => api.get('/kato/', { params: { parent_id } }).then(res => res.data);
+export const getKatoById = (id: number): Promise<Kato> => api.get(`/kato/${id}`).then(res => res.data);
+export const getKatoParents = (id: number): Promise<Kato[]> => api.get(`/kato/${id}/parents`).then(res => res.data);
 export const getAgsk = (q?: string): Promise<Agsk[]> => api.get('/lookups/agsk', { params: { q } }).then(res => res.data);
 export const getCostItems = (q?: string): Promise<CostItem[]> => api.get('/lookups/cost-items', { params: { q } }).then(res => res.data);
 export const getSourceFunding = (q?: string): Promise<SourceFunding[]> => api.get('/lookups/source-funding', { params: { q } }).then(res => res.data);
@@ -97,6 +114,21 @@ export const getSmetas = (): Promise<Smeta[]> => api.get('/plans/').then(res => 
 export const getSmetaById = (smetaId: number): Promise<Smeta> => api.get(`/plans/${smetaId}`).then(res => res.data);
 export const createSmeta = (data: { year: number }): Promise<Smeta> => api.post('/plans/', data).then(res => res.data);
 export const deleteSmeta = (smetaId: number): Promise<void> => api.delete(`/plans/${smetaId}`);
+export const updateSmetaStatus = (smetaId: number, status: PlanStatus): Promise<Smeta> => 
+  api.patch(`/plans/${smetaId}/status`, { status }).then(res => res.data);
+
+export const exportSmetaToExcel = async (smetaId: number): Promise<void> => {
+  const response = await api.get(`/plans/${smetaId}/export-excel`, {
+    responseType: 'blob', // Важно для скачивания файла
+  });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `smeta_${smetaId}.xlsx`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
 
 // --- API для Позиций Сметы ---
 export const getSmetaItemEditData = (itemId: number): Promise<SmetaItemEditData> => api.get(`/items/${itemId}/edit-data`).then(res => res.data);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { 
   Box, Button, Typography, Paper, CircularProgress, Alert, 
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, DialogContentText
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +20,9 @@ export default function Dashboard() {
   
   const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
   const [newSmetaYear, setNewSmetaYear] = useState(new Date().getFullYear());
+  
+  const [isErrorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [errorDialogMessage, setErrorDialogMessage] = useState('');
 
   useEffect(() => {
     loadSmetas();
@@ -28,6 +31,7 @@ export default function Dashboard() {
   const loadSmetas = async () => {
     try {
       setLoading(true);
+      setError(''); // Сброс ошибки перед загрузкой
       const data = await getSmetas();
       setSmetas(data);
     } catch (err) {
@@ -53,7 +57,8 @@ export default function Dashboard() {
       handleCloseCreateDialog();
       navigate(`/plans/${newSmeta.id}`);
     } catch (err) {
-      setError('Ошибка при создании сметы.');
+      setErrorDialogMessage('Ошибка при создании сметы.');
+      setErrorDialogOpen(true);
     }
   };
 
@@ -62,16 +67,23 @@ export default function Dashboard() {
       try {
         await deleteSmeta(smetaId);
         setSmetas(smetas.filter(s => s.id !== smetaId));
-      } catch (err) {
-        setError('Ошибка при удалении сметы.');
+      } catch (err: any) {
+        const message = err.response?.data?.detail || 'Произошла неизвестная ошибка при удалении.';
+        setErrorDialogMessage(message);
+        setErrorDialogOpen(true);
       }
     }
+  };
+
+  const closeErrorDialog = () => {
+    setErrorDialogOpen(false);
+    setErrorDialogMessage('');
   };
 
   return (
     <>
       <Header />
-      <Box sx={{ p: 4, maxWidth: 'lg', mx: 'auto' }}>
+      <Box sx={{ p: 4, maxWidth: '1500px', mx: 'auto' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
           <Typography variant="h4" fontWeight="bold">{t('dashboard_title')}</Typography>
           <Button
@@ -84,7 +96,7 @@ export default function Dashboard() {
         </Box>
 
         {loading && <CircularProgress />}
-        {error && <Alert severity="error">{error}</Alert>}
+        {error && !loading && <Alert severity="error">{error}</Alert>}
 
         {!loading && !error && (
           <TableContainer component={Paper}>
@@ -129,7 +141,8 @@ export default function Dashboard() {
         )}
       </Box>
 
-      <Dialog open={isCreateDialogOpen} onClose={handleCloseCreateDialog}>
+      {/* Диалог создания сметы */}
+      <Dialog open={isCreateDialogOpen} onClose={handleCloseCreateDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Создать новую смету</DialogTitle>
         <DialogContent>
           <TextField
@@ -146,6 +159,24 @@ export default function Dashboard() {
         <DialogActions>
           <Button onClick={handleCloseCreateDialog}>{t('cancel')}</Button>
           <Button onClick={handleCreateSmeta}>{t('create_plan')}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Диалог для отображения ошибок */}
+      <Dialog
+        open={isErrorDialogOpen}
+        onClose={closeErrorDialog}
+      >
+        <DialogTitle>⚠️Ошибка</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {errorDialogMessage}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeErrorDialog} autoFocus>
+            Закрыть
+          </Button>
         </DialogActions>
       </Dialog>
     </>

@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from src.database.database import get_db
-from src.models.models import User
+from ..database.database import get_db
+from ..models.models import User
 
 # --- Конфигурация ---
 SECRET_KEY = "a_very_secret_key_that_should_be_in_env_vars"
