@@ -1,5 +1,5 @@
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import func, desc, and_
 from decimal import Decimal
 from fastapi import HTTPException, status
 import io
@@ -7,116 +7,109 @@ import openpyxl
 from ..models import models
 from ..schemas import plan as plan_schema
 
+# ========= Вспомогательные функции для версий =========
 
-# ========= Вспомогательные функции =========
+def _get_active_version(db: Session, plan_id: int, lock: bool = False) -> models.ProcurementPlanVersion | None:
+    """Получает активную версию плана."""
+    query = db.query(models.ProcurementPlanVersion).filter(
+        models.ProcurementPlanVersion.plan_id == plan_id,
+        models.ProcurementPlanVersion.is_active == True
+    )
+    if lock:
+        query = query.with_for_update()
+    return query.first()
 
-def _calculate_and_store_plan_metrics(db: Session, plan: models.ProcurementPlan, is_final: bool):
-    """Рассчитывает и сохраняет метрики для плана (КТП, импорт, общая сумма)."""
+def _recalculate_version_metrics(db: Session, version_id: int):
+    """Пересчитывает общую сумму и другие метрики для конкретной версии плана."""
+    version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
+    if not version:
+        return
 
-    # Используем SQLAlchemy выражения
-    total_result = db.query(func.sum(models.PlanItem.total_amount)).filter(
-        models.PlanItem.plan_id == plan.id
+    total_amount_res = db.query(func.sum(models.PlanItemVersion.total_amount)).filter(
+        models.PlanItemVersion.version_id == version_id,
+        models.PlanItemVersion.is_deleted == False
+    ).first()
+    ktp_amount_res = db.query(func.sum(models.PlanItemVersion.total_amount)).filter(
+        models.PlanItemVersion.version_id == version_id,
+        models.PlanItemVersion.is_ktp == True,
+        models.PlanItemVersion.is_deleted == False
     ).first()
 
-    ktp_result = db.query(func.sum(models.PlanItem.total_amount)).filter(
-        models.PlanItem.plan_id == plan.id,
-        models.PlanItem.is_ktp == True  # SQL выражение
-    ).first()
+    total_amount = total_amount_res[0] if total_amount_res[0] is not None else Decimal('0.00')
+    ktp_amount = ktp_amount_res[0] if ktp_amount_res[0] is not None else Decimal('0.00')
 
-    total_amount = total_result[0] if total_result[0] is not None else Decimal('0.00')
-    ktp_amount = ktp_result[0] if ktp_result[0] is not None else Decimal('0.00')
-
-    ktp_percentage = (ktp_amount / total_amount * 100) if total_amount > 0 else Decimal('0.00')
-    import_percentage = Decimal('100.00') - ktp_percentage
-
-    if is_final:
-        plan.final_total_amount = total_amount
-        plan.final_ktp_percentage = ktp_percentage
-        plan.final_import_percentage = import_percentage
+    if total_amount > 0:
+        ktp_percentage = (ktp_amount / total_amount * 100)
+        import_percentage = Decimal('100.00') - ktp_percentage
     else:
-        plan.pre_approved_total_amount = total_amount
-        plan.pre_approved_ktp_percentage = ktp_percentage
-        plan.pre_approved_import_percentage = import_percentage
+        ktp_percentage = Decimal('0.00')
+        import_percentage = Decimal('0.00')
 
+    version.total_amount = total_amount
+    version.ktp_percentage = ktp_percentage
+    version.import_percentage = import_percentage
     db.commit()
-
-
-def _recalculate_plan_total(db: Session, plan_id: int):
-    """Пересчитывает общую сумму плана."""
-    total = db.query(func.sum(models.PlanItem.total_amount)).filter(
-        models.PlanItem.plan_id == plan_id
-    ).scalar() or Decimal('0.00')
-
-    db.query(models.ProcurementPlan).filter(
-        models.ProcurementPlan.id == plan_id
-    ).update({'total_amount': total})
-    db.commit()
-
+    db.refresh(version)
 
 # ========= Сервисы для Смет Закупок (ProcurementPlan) =========
 
 def create_plan(db: Session, plan_in: plan_schema.ProcurementPlanCreate, user: models.User) -> models.ProcurementPlan:
-    db_plan = models.ProcurementPlan(**plan_in.model_dump(), created_by=user.id, status=models.PlanStatus.DRAFT)
+    db_plan = models.ProcurementPlan(
+        plan_name=plan_in.plan_name,
+        year=plan_in.year,
+        created_by=user.id
+    )
     db.add(db_plan)
+    db.flush()
+
+    initial_version = models.ProcurementPlanVersion(
+        plan_id=db_plan.id,
+        version_number=1,
+        status=models.PlanStatus.DRAFT,
+        is_active=True,
+        created_by=user.id
+    )
+    db.add(initial_version)
     db.commit()
     db.refresh(db_plan)
     return db_plan
 
-
-def get_plan(db: Session, plan_id: int) -> models.ProcurementPlan | None:
-    plan = db.query(models.ProcurementPlan).options(
-        joinedload(models.ProcurementPlan.items).options(
-            joinedload(models.PlanItem.enstru),
-            joinedload(models.PlanItem.unit),
-            joinedload(models.PlanItem.expense_item),
-            joinedload(models.PlanItem.funding_source),
-            joinedload(models.PlanItem.agsk),
-            joinedload(models.PlanItem.kato_purchase),
-            joinedload(models.PlanItem.kato_delivery)
+def get_plan_with_active_version(db: Session, plan_id: int) -> models.ProcurementPlan | None:
+    return db.query(models.ProcurementPlan).options(
+        selectinload(models.ProcurementPlan.versions)
+        .selectinload(models.ProcurementPlanVersion.items)
+        .options(
+            joinedload(models.PlanItemVersion.enstru),
+            joinedload(models.PlanItemVersion.unit),
+            joinedload(models.PlanItemVersion.expense_item),
+            joinedload(models.PlanItemVersion.funding_source),
+            joinedload(models.PlanItemVersion.agsk),
+            joinedload(models.PlanItemVersion.kato_purchase),
+            joinedload(models.PlanItemVersion.kato_delivery)
         )
-    ).filter(models.ProcurementPlan.id == plan_id).first()
-
-    if not plan:
-        return None
-
-    # Используем SQLAlchemy для подсчета
-    ktp_sum = db.query(func.sum(models.PlanItem.total_amount)).filter(
-        models.PlanItem.plan_id == plan_id,
-        models.PlanItem.is_ktp == True  # SQL выражение
-    ).scalar() or Decimal('0.00')
-
-    plan.ktp_amount = ktp_sum
-    plan.non_ktp_amount = plan.total_amount - ktp_sum
-
-    return plan
-
+    ).filter(
+        models.ProcurementPlan.id == plan_id
+    ).first()
 
 def get_plans_by_user(db: Session, user: models.User, skip: int = 0, limit: int = 100) -> list[models.ProcurementPlan]:
-    return db.query(models.ProcurementPlan).filter(
+    return db.query(models.ProcurementPlan).options(
+        selectinload(models.ProcurementPlan.versions).selectinload(models.ProcurementPlanVersion.creator)
+    ).filter(
         models.ProcurementPlan.created_by == user.id
-    ).offset(skip).limit(limit).all()
+    ).order_by(desc(models.ProcurementPlan.id)).offset(skip).limit(limit).all()
 
 
-def update_plan(db: Session, plan_id: int, plan_in: plan_schema.ProcurementPlanUpdate) -> models.ProcurementPlan:
-    db_plan = get_plan(db, plan_id)
-    update_data = plan_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_plan, key, value)
-    db.commit()
-    db.refresh(db_plan)
-    return db_plan
+def update_plan_status(db: Session, plan_id: int, new_status: models.PlanStatus, user: models.User) -> models.ProcurementPlanVersion:
+    active_version = _get_active_version(db, plan_id, lock=True)
+    if not active_version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активная версия плана не найдена")
 
-
-def update_plan_status(db: Session, plan_id: int, new_status: models.PlanStatus) -> models.ProcurementPlan:
-    db_plan = get_plan(db, plan_id)
-    current_status = db_plan.status
+    current_status = active_version.status
 
     if current_status == models.PlanStatus.DRAFT and new_status == models.PlanStatus.PRE_APPROVED:
-        _calculate_and_store_plan_metrics(db, db_plan, is_final=False)
-        db_plan.status = new_status
+        active_version.status = new_status
     elif current_status == models.PlanStatus.PRE_APPROVED and new_status == models.PlanStatus.APPROVED:
-        _calculate_and_store_plan_metrics(db, db_plan, is_final=True)
-        db_plan.status = new_status
+        active_version.status = new_status
     elif current_status == new_status:
         pass
     else:
@@ -126,142 +119,196 @@ def update_plan_status(db: Session, plan_id: int, new_status: models.PlanStatus)
         )
 
     db.commit()
-    db.refresh(db_plan)
-    return db_plan
+    db.refresh(active_version)
+    return active_version
 
+def create_new_version_for_editing(db: Session, plan_id: int, user: models.User) -> models.ProcurementPlanVersion:
+    db.begin_nested()
+    try:
+        current_active_version = db.query(models.ProcurementPlanVersion).filter(
+            models.ProcurementPlanVersion.plan_id == plan_id,
+            models.ProcurementPlanVersion.is_active == True
+        ).options(
+            selectinload(models.ProcurementPlanVersion.items)
+        ).with_for_update().first()
 
-def delete_plan(db: Session, plan_id: int) -> bool:
-    db_plan = db.query(models.ProcurementPlan).filter(
-        models.ProcurementPlan.id == plan_id
-    ).first()
-    if not db_plan:
-        return False
-    db.delete(db_plan)
+        if not current_active_version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активная версия не найдена.")
+
+        if current_active_version.status == models.PlanStatus.DRAFT:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя создать новую версию из черновика. Сначала одобрите текущую версию.")
+
+        current_active_version.is_active = False
+        db.add(current_active_version)
+
+        new_version_number = current_active_version.version_number + 1
+        new_version = models.ProcurementPlanVersion(
+            plan_id=plan_id,
+            version_number=new_version_number,
+            status=models.PlanStatus.DRAFT,
+            is_active=True,
+            created_by=user.id,
+            total_amount=current_active_version.total_amount,
+            ktp_percentage=current_active_version.ktp_percentage,
+            import_percentage=current_active_version.import_percentage
+        )
+        db.add(new_version)
+        db.flush()
+
+        new_items = []
+        for item in current_active_version.items:
+            if not item.is_deleted:
+                new_item_data = {
+                    key: getattr(item, key)
+                    for key in item.__table__.columns.keys()
+                    if key not in ['id', 'version_id']
+                }
+                new_item_data['version_id'] = new_version.id
+                new_items.append(models.PlanItemVersion(**new_item_data))
+
+        if new_items:
+            db.bulk_save_objects(new_items)
+
+        db.commit()
+        db.refresh(new_version)
+        return new_version
+    except Exception:
+        db.rollback()
+        raise
+
+def delete_latest_version(db: Session, plan_id: int, user: models.User):
+    db.begin_nested()
+    try:
+        active_version = _get_active_version(db, plan_id, lock=True)
+        if not active_version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активная версия не найдена.")
+
+        if active_version.status != models.PlanStatus.DRAFT:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Удалять можно только версию в статусе 'Черновик'.")
+
+        if active_version.version_number == 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя удалить самую первую версию. Вместо этого удалите весь план.")
+
+        previous_version = db.query(models.ProcurementPlanVersion).filter(
+            models.ProcurementPlanVersion.plan_id == plan_id,
+            models.ProcurementPlanVersion.version_number == active_version.version_number - 1
+        ).with_for_update().first()
+
+        if not previous_version:
+             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Предыдущая версия не найдена для восстановления.")
+
+        db.query(models.PlanItemVersion).filter(
+            models.PlanItemVersion.version_id == active_version.id
+        ).delete(synchronize_session=False)
+
+        db.delete(active_version)
+
+        previous_version.is_active = True
+        db.add(previous_version)
+
+        db.commit()
+        return {"message": f"Версия {active_version.version_number} удалена. Активной стала версия {previous_version.version_number}."}
+    except Exception:
+        db.rollback()
+        raise
+
+def delete_plan(db: Session, plan_id: int):
+    plan_to_delete = db.query(models.ProcurementPlan).options(
+        selectinload(models.ProcurementPlan.versions)
+    ).filter(models.ProcurementPlan.id == plan_id).first()
+
+    if not plan_to_delete:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="План не найден.")
+
+    has_approved_version = any(
+        v.status in [models.PlanStatus.PRE_APPROVED, models.PlanStatus.APPROVED]
+        for v in plan_to_delete.versions
+    )
+    if has_approved_version:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нельзя удалить план, который уже был одобрен.")
+
+    db.delete(plan_to_delete)
     db.commit()
     return True
 
+# ========= Сервисы для Позиций Плана (PlanItemVersion) =========
 
-def export_plan_to_excel(db: Session, plan_id: int) -> bytes:
-    plan = get_plan(db, plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Смета не найдена")
+def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCreate, user: models.User) -> models.PlanItemVersion:
+    active_version = _get_active_version(db, plan_id)
+    if not active_version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активная версия плана не найдена")
+    if active_version.status != models.PlanStatus.DRAFT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Добавлять позиции можно только в черновик.")
+
+    enstru_item = db.query(models.Enstru).filter(models.Enstru.code == item_in.trucode).first()
+    if not enstru_item:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Код ЕНС ТРУ не найден")
+
+    last_item = db.query(models.PlanItemVersion).filter(
+        models.PlanItemVersion.version_id == active_version.id,
+        models.PlanItemVersion.is_deleted == False
+    ).order_by(desc(models.PlanItemVersion.item_number)).first()
+    item_number = (last_item.item_number + 1) if last_item else 1
+
+    total_amount = item_in.quantity * item_in.price_per_unit
+
+    db_item = models.PlanItemVersion(
+        **item_in.model_dump(),
+        version_id=active_version.id,
+        item_number=item_number,
+        total_amount=total_amount,
+        need_type=models.NeedType(enstru_item.type_ru)
+    )
+    db.add(db_item)
+    db.commit()
+
+    _recalculate_version_metrics(db, active_version.id)
+
+    db.refresh(db_item)
+    return db_item
+
+def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> bytes:
+    if version_id:
+        version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
+    else:
+        version = _get_active_version(db, plan_id)
+
+    if not version:
+        raise HTTPException(status_code=404, detail="Версия сметы не найдена")
+
+    version_with_items = db.query(models.ProcurementPlanVersion).options(
+        selectinload(models.ProcurementPlanVersion.items).options(
+            joinedload(models.PlanItemVersion.enstru),
+            joinedload(models.PlanItemVersion.unit)
+        ),
+        joinedload(models.ProcurementPlanVersion.plan)
+    ).filter(models.ProcurementPlanVersion.id == version.id).one()
+
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = f"Смета {plan.id}"
+    ws.title = f"Смета {version_with_items.plan.id} v{version_with_items.version_number}"
 
     headers = [
-        "№", "Код ЕНС ТРУ", "Наименование", "Доп. спецификация", "Ед. изм.",
+        "№", "Код ЕНС ТРУ", "Наименование", "Ед. изм.",
         "Кол-во", "Цена за ед.", "Общая сумма", "КТП", "Резидент"
     ]
     ws.append(headers)
 
-    for item in plan.items:
-        # Для Excel можно оставить как есть или использовать bool()
+    for item in version_with_items.items:
         row = [
             item.item_number,
             item.trucode,
             item.enstru.name_ru if item.enstru else "",
-            item.additional_specs or "",
             item.unit.name_ru if item.unit else "",
             item.quantity,
             item.price_per_unit,
             item.total_amount,
-            "Да" if bool(item.is_ktp) else "Нет",  # Преобразуем в bool
-            "Да" if bool(item.is_resident) else "Нет",
+            "Да" if item.is_ktp else "Нет",
+            "Да" if item.is_resident else "Нет",
         ]
         ws.append(row)
 
     virtual_workbook = io.BytesIO()
     wb.save(virtual_workbook)
     return virtual_workbook.getvalue()
-
-
-# ========= Сервисы для Позиций Сметы (PlanItem) =========
-
-def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCreate,
-                     user: models.User) -> models.PlanItem:
-    plan = get_plan(db, plan_id)
-    if not plan:
-        raise ValueError("Смета не найдена")
-
-    enstru_item = db.query(models.Enstru).filter(
-        models.Enstru.code == item_in.trucode
-    ).first()
-    if not enstru_item:
-        raise ValueError("ЕНС ТРУ не найден")
-
-    last_item = db.query(models.PlanItem).filter(
-        models.PlanItem.plan_id == plan_id
-    ).order_by(desc(models.PlanItem.item_number)).first()
-
-    item_number = (last_item.item_number + 1) if last_item else 1
-
-    total_amount = item_in.quantity * item_in.price_per_unit
-
-    db_item = models.PlanItem(
-        **item_in.model_dump(),
-        plan_id=plan_id,
-        item_number=item_number,
-        total_amount=total_amount,
-        need_type=models.NeedType(enstru_item.type_ru),
-        created_by=user.id
-    )
-    db.add(db_item)
-    db.commit()
-
-    _recalculate_plan_total(db, plan_id)
-
-    db.refresh(db_item)
-    return db_item
-
-
-def get_item(db: Session, item_id: int) -> models.PlanItem | None:
-    return db.query(models.PlanItem).filter(
-        models.PlanItem.id == item_id
-    ).first()
-
-
-def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate) -> models.PlanItem | None:
-    db_item = get_item(db, item_id)
-    if not db_item:
-        return None
-
-    db_plan = get_plan(db, db_item.plan_id)
-    if db_plan.status == models.PlanStatus.APPROVED:
-        raise HTTPException(status_code=403, detail="Редактирование запрещено, смета находится в финальном статусе.")
-
-    update_data = item_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_item, key, value)
-
-    if 'quantity' in update_data or 'price_per_unit' in update_data:
-        db_item.total_amount = db_item.quantity * db_item.price_per_unit
-
-    if 'trucode' in update_data:
-        enstru_item = db.query(models.Enstru).filter(
-            models.Enstru.code == update_data['trucode']
-        ).first()
-        if enstru_item:
-            db_item.need_type = models.NeedType(enstru_item.type_ru)
-
-    db.commit()
-    _recalculate_plan_total(db, db_item.plan_id)
-    db.refresh(db_item)
-    return db_item
-
-
-def delete_item(db: Session, item_id: int) -> bool:
-    db_item = get_item(db, item_id)
-    if not db_item:
-        return False
-
-    db_plan = get_plan(db, db_item.plan_id)
-    if db_plan.status == models.PlanStatus.APPROVED:
-        raise HTTPException(status_code=403, detail="Удаление запрещено, смета находится в финальном статусе.")
-
-    plan_id_val = db_item.plan_id
-    db.delete(db_item)
-    db.commit()
-    _recalculate_plan_total(db, plan_id_val)
-    return True

@@ -2,6 +2,14 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 
+# Схема для User (для отображения в других схемах)
+class UserLookup(BaseModel):
+    id: int
+    full_name: str
+
+    class Config:
+        from_attributes = True
+
 # Схема для Mkei
 class Mkei(BaseModel):
     id: int

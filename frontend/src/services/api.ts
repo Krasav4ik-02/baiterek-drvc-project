@@ -1,13 +1,28 @@
 import axios from 'axios';
+import type { 
+    Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
+    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload 
+} from './api.types';
+import { PlanStatus } from './api.types';
 
-const api = axios.create({ baseURL: '/api' });
+// Настройка экземпляра axios
+const api = axios.create({
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
+// Интерцептор для добавления токена авторизации
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
+// Интерцептор для обработки ошибок (например, 401 Unauthorized)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -18,84 +33,6 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-// --- Типы Справочников ---
-export interface Mkei { id: number; code: string; name_ru: string; name_kz: string; }
-export interface Kato { id: number; parent_id: number | null; code: string; name_ru: string; name_kz: string; has_children: boolean; }
-export interface Agsk { id: number; group: string; code: string; name_ru: string; }
-export interface CostItem { id: number; name_ru: string; name_kz: string; }
-export interface SourceFunding { id: number; name_ru: string; name_kz: string; }
-export interface Enstru { id: number; code: string; name_ru: string; name_kz: string; type_ru: string; specs_ru?: string; }
-
-// --- Основные Типы ---
-export type NeedType = "Товар" | "Работа" | "Услуга";
-export enum PlanStatus {
-  DRAFT = "DRAFT",
-  PRE_APPROVED = "PRE_APPROVED",
-  APPROVED = "APPROVED",
-}
-
-export interface Smeta {
-  id: number;
-  year: number;
-  total_amount: number;
-  status: PlanStatus;
-  
-  pre_approved_total_amount?: number;
-  pre_approved_ktp_percentage?: number;
-  pre_approved_import_percentage?: number;
-
-  final_total_amount?: number;
-  final_ktp_percentage?: number;
-  final_import_percentage?: number;
-
-  ktp_amount?: number;
-  non_ktp_amount?: number;
-  
-  items: SmetaItem[];
-}
-
-export interface SmetaItem {
-  id: number;
-  plan_id: number;
-  item_number: number;
-  need_type: NeedType;
-  additional_specs?: string;
-  quantity: number;
-  price_per_unit: number;
-  total_amount: number;
-  is_ktp: boolean;
-  is_resident: boolean;
-  ktp_applicable: boolean;
-  
-  enstru: Enstru;
-  unit?: Mkei;
-  expense_item: CostItem;
-  funding_source: SourceFunding;
-  agsk?: Agsk;
-  kato_purchase?: Kato;
-  kato_delivery?: Kato;
-}
-
-export interface SmetaItemPayload {
-  trucode: string;
-  unit_id?: number;
-  expense_item_id: number;
-  funding_source_id: number;
-  agsk_id?: string;
-  kato_purchase_id?: number;
-  kato_delivery_id?: number;
-  additional_specs?: string;
-  quantity: number;
-  price_per_unit: number;
-  is_ktp: boolean;
-  is_resident: boolean;
-  ktp_applicable: boolean;
-}
-
-export interface SmetaItemEditData {
-    item: SmetaItem;
-}
 
 // --- API для Справочников ---
 export const getMkei = (q?: string): Promise<Mkei[]> => api.get('/lookups/mkei', { params: { q } }).then(res => res.data);
@@ -109,31 +46,41 @@ export const getSourceFunding = (q?: string): Promise<SourceFunding[]> => api.ge
 export const getEnstru = (q?: string): Promise<Enstru[]> => api.get('/lookups/enstru', { params: { q } }).then(res => res.data);
 export const checkKtp = (enstruCode: string): Promise<{ is_ktp: boolean }> => api.get(`/lookups/check-ktp/${enstruCode}`).then(res => res.data);
 
-// --- API для Смет ---
-export const getSmetas = (): Promise<Smeta[]> => api.get('/plans/').then(res => res.data);
-export const getSmetaById = (smetaId: number): Promise<Smeta> => api.get(`/plans/${smetaId}`).then(res => res.data);
-export const createSmeta = (data: { year: number }): Promise<Smeta> => api.post('/plans/', data).then(res => res.data);
-export const deleteSmeta = (smetaId: number): Promise<void> => api.delete(`/plans/${smetaId}`);
-export const updateSmetaStatus = (smetaId: number, status: PlanStatus): Promise<Smeta> => 
-  api.patch(`/plans/${smetaId}/status`, { status }).then(res => res.data);
 
-export const exportSmetaToExcel = async (smetaId: number): Promise<void> => {
-  const response = await api.get(`/plans/${smetaId}/export-excel`, {
-    responseType: 'blob', // Важно для скачивания файла
+// --- API для Планов (ProcurementPlan) ---
+export const getPlans = (): Promise<ProcurementPlan[]> => api.get('/plans/').then(res => res.data);
+export const getPlanById = (planId: number): Promise<ProcurementPlan> => api.get(`/plans/${planId}`).then(res => res.data);
+export const createPlan = (data: { plan_name: string; year: number }): Promise<ProcurementPlan> => api.post('/plans/', data).then(res => res.data);
+export const deletePlan = (planId: number): Promise<void> => api.delete(`/plans/${planId}`);
+
+// --- API для Версий Плана (ProcurementPlanVersion) ---
+export const createVersion = (planId: number): Promise<ProcurementPlanVersion> => api.post(`/plans/${planId}/versions`).then(res => res.data);
+export const updateVersionStatus = (planId: number, status: PlanStatus): Promise<ProcurementPlanVersion> =>
+  api.patch(`/plans/${planId}/versions/active/status`, { status }).then(res => res.data);
+export const deleteLatestVersion = (planId: number): Promise<{ message: string }> => api.delete(`/plans/${planId}/versions/latest`).then(res => res.data);
+
+export const exportVersionToExcel = async (planId: number, versionId: number): Promise<void> => {
+  const response = await api.get(`/plans/${planId}/versions/${versionId}/export-excel`, {
+    responseType: 'blob',
   });
   const url = window.URL.createObjectURL(new Blob([response.data]));
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', `smeta_${smetaId}.xlsx`);
+  link.setAttribute('download', `plan_${planId}_v${versionId}.xlsx`);
   document.body.appendChild(link);
   link.click();
   link.remove();
 };
 
-// --- API для Позиций Сметы ---
-export const getSmetaItemEditData = (itemId: number): Promise<SmetaItemEditData> => api.get(`/items/${itemId}/edit-data`).then(res => res.data);
-export const addItemToSmeta = (smetaId: number, itemData: SmetaItemPayload): Promise<SmetaItem> => api.post(`/plans/${smetaId}/items`, itemData).then(res => res.data);
-export const updateItem = (itemId: number, itemData: Partial<SmetaItemPayload>): Promise<SmetaItem> => api.put(`/items/${itemId}`, itemData).then(res => res.data);
+// --- API для Позиций Плана (PlanItem) ---
+export const getItemById = (itemId: number): Promise<PlanItemVersion> => api.get(`/items/${itemId}`).then(res => res.data);
+export const addItemToPlan = (planId: number, itemData: PlanItemPayload): Promise<PlanItemVersion> => api.post(`/plans/${planId}/items`, itemData).then(res => res.data);
+export const updateItem = (itemId: number, itemData: Partial<PlanItemPayload>): Promise<PlanItemVersion> => api.put(`/items/${itemId}`, itemData).then(res => res.data);
 export const deleteItem = (itemId: number): Promise<void> => api.delete(`/items/${itemId}`);
 
 export default api;
+export { PlanStatus };
+export type { 
+    Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
+    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload 
+};

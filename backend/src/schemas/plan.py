@@ -5,7 +5,26 @@ from decimal import Decimal
 from ..models.models import NeedType, PlanStatus
 from . import lookup as lookup_schema
 
-# ========= Схемы для Позиций Сметы (PlanItem) =========
+# ========= Схемы для Версий Плана (ProcurementPlanVersion) =========
+
+class ProcurementPlanVersionBase(BaseModel):
+    status: PlanStatus
+    total_amount: Decimal = Field(default=0)
+    ktp_percentage: Optional[Decimal] = Field(default=0)
+    import_percentage: Optional[Decimal] = Field(default=0)
+    is_active: bool
+
+class ProcurementPlanVersion(ProcurementPlanVersionBase):
+    id: int
+    plan_id: int
+    version_number: int
+    created_at: datetime
+    creator: Optional[lookup_schema.UserLookup] = None
+
+    class Config:
+        from_attributes = True
+
+# ========= Схемы для Позиций Версии Плана (PlanItemVersion) =========
 
 class PlanItemBase(BaseModel):
     trucode: str = Field(..., description="Код ЕНС ТРУ")
@@ -15,12 +34,10 @@ class PlanItemBase(BaseModel):
     agsk_id: Optional[str] = None
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
-    additional_specs: Optional[str] = None
-    quantity: Decimal = Field(..., gt=0)
-    price_per_unit: Decimal = Field(..., gt=0)
+    quantity: Decimal = Field(..., gt=0, description="Количество")
+    price_per_unit: Decimal = Field(..., gt=0, description="Цена за единицу")
     is_ktp: bool = False
     is_resident: bool = False
-    ktp_applicable: bool = False
 
 class PlanItemCreate(PlanItemBase):
     pass
@@ -34,69 +51,71 @@ class PlanItemUpdate(PlanItemBase):
     price_per_unit: Optional[Decimal] = Field(None, gt=0)
     is_ktp: Optional[bool] = None
     is_resident: Optional[bool] = None
-    ktp_applicable: Optional[bool] = None
 
 class PlanItem(BaseModel):
     id: int
-    plan_id: int
+    version_id: int
     item_number: int
     need_type: NeedType
-    additional_specs: Optional[str] = None
+    trucode: str
     quantity: Decimal
     price_per_unit: Decimal
     total_amount: Decimal
     is_ktp: bool
     is_resident: bool
-    ktp_applicable: bool
+    is_deleted: bool # Добавлено поле
     created_at: datetime
-    updated_at: Optional[datetime] = None
-    enstru: lookup_schema.Enstru
+
+    enstru: Optional[lookup_schema.Enstru] = None
     unit: Optional[lookup_schema.Mkei] = None
-    expense_item: lookup_schema.CostItem
-    funding_source: lookup_schema.SourceFunding
+    expense_item: Optional[lookup_schema.CostItem] = None
+    funding_source: Optional[lookup_schema.SourceFunding] = None
     agsk: Optional[lookup_schema.Agsk] = None
     kato_purchase: Optional[lookup_schema.Kato] = None
     kato_delivery: Optional[lookup_schema.Kato] = None
+    
+    version: ProcurementPlanVersion
 
     class Config:
         from_attributes = True
 
-# ========= Схемы для Сметы Закупок (ProcurementPlan) =========
+class ProcurementPlanVersionWithItems(ProcurementPlanVersion):
+    items: List[PlanItem] = []
+
+# ========= Схемы для Плана Закупок (ProcurementPlan) =========
 
 class ProcurementPlanBase(BaseModel):
+    plan_name: str = Field(..., min_length=3, max_length=128)
     year: int
 
 class ProcurementPlanCreate(ProcurementPlanBase):
     pass
 
-class ProcurementPlanUpdate(ProcurementPlanBase):
-    year: Optional[int] = None
-
 class ProcurementPlan(ProcurementPlanBase):
     id: int
-    total_amount: Decimal
-    status: PlanStatus
-    pre_approved_total_amount: Optional[Decimal] = None
-    pre_approved_ktp_percentage: Optional[Decimal] = None
-    pre_approved_import_percentage: Optional[Decimal] = None
-    final_total_amount: Optional[Decimal] = None
-    final_ktp_percentage: Optional[Decimal] = None
-    final_import_percentage: Optional[Decimal] = None
-    ktp_amount: Optional[Decimal] = 0
-    non_ktp_amount: Optional[Decimal] = 0
     created_by: int
     created_at: datetime
-    updated_at: Optional[datetime] = None
-    items: List[PlanItem] = []
 
     class Config:
         from_attributes = True
 
+# ========= Схемы для ответов API =========
+
+class ProcurementPlanWithVersions(ProcurementPlan):
+    """План со списком всех его версий (без позиций)."""
+    versions: List[ProcurementPlanVersion] = []
+
+class ProcurementPlanWithFullActiveVersion(ProcurementPlan):
+    """План с полной информацией по активной версии, включая все ее позиции."""
+    versions: List[ProcurementPlanVersionWithItems] = []
+
+    def get_active_version(self) -> Optional[ProcurementPlanVersionWithItems]:
+        for v in self.versions:
+            if v.is_active:
+                return v
+        return None
+
+# ========= Схемы для обновления статуса =========
+
 class ProcurementPlanStatusUpdate(BaseModel):
     status: PlanStatus
-
-# --- Схемы для ответа эндпоинта редактирования ---
-
-class SmetaItemEditResponse(BaseModel):
-    item: PlanItem
-    initial_options: lookup_schema.InitialOptions

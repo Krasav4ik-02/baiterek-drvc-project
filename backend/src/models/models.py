@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, Date,
-    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum
+    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum, and_
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -37,6 +37,7 @@ class ProcurementPlan(Base):
     __tablename__ = "procurement_plans"
 
     id = Column(Integer, primary_key=True)
+    plan_name = Column(String(128), nullable=False) # Новое поле
     year = Column(SmallInteger, nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -62,16 +63,17 @@ class ProcurementPlanVersion(Base):
     ktp_percentage = Column(Numeric(5, 2))
     import_percentage = Column(Numeric(5, 2))
 
-    is_active = Column(Boolean, default=True)  # текущая версия
+    is_active = Column(Boolean, default=True)
 
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     plan = relationship("ProcurementPlan", back_populates="versions")
+    
     items = relationship(
         "PlanItemVersion",
         back_populates="version",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (
@@ -107,6 +109,10 @@ class PlanItemVersion(Base):
 
     is_ktp = Column(Boolean, default=False)
     is_resident = Column(Boolean, default=False)
+    
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     version = relationship("ProcurementPlanVersion", back_populates="items")
     enstru = relationship("Enstru")

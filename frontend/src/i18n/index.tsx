@@ -22,7 +22,18 @@ const translations = {
     smeta_id: 'ID',
     smeta_year: 'Год',
     smeta_amount: 'Сумма',
-    
+    active_version_amount: 'Сумма активной версий',
+    current_status: 'Текущий статус',
+    plan_details: 'Название сметы',
+    create_new_version_tooltip:'Создать новую версию сметы',
+    confirm_create_version: 'Вы уверены что хотите создать новую версию?',
+    versions_history: 'История версий',
+    version: 'Версия',
+    status: 'Статус',
+    total_amount: 'Общая сумма',
+    creation_date: 'Дата создания',
+    active: 'Активный',
+
     // SmetaForm (ранее PlanForm)
     smeta_form_title: 'Смета закупок на {year} год',
     smeta_items_title: 'Позиции сметы',
@@ -55,9 +66,11 @@ const translations = {
     ktp_applicable_label: 'Применима ли закупка у КТП',
     is_resident_label: 'Резидентство РК',
     // StatusChip
-    status_draft: 'Черновик',
-    status_pre_approved: 'Предварительно утвержденный',
-    status_approved: 'Утвержденный',
+    status_DRAFT: 'Черновик',
+    status_PRE_APPROVED: 'Предварительно утвержденный',
+    status_APPROVED: 'Утвержденный',
+    // Errors
+    error_title: 'Ошибка',
   },
   kk: {
     // General
@@ -65,7 +78,7 @@ const translations = {
     delete: 'Жою',
     save: 'Сақтау',
     cancel: 'Бас тарту',
-    actions: 'Әрекеттер',
+    main_actions: 'Әрекеттер',
 
     // Header
     create_plan: 'Сметаны құру',
@@ -77,6 +90,17 @@ const translations = {
     smeta_id: 'ID',
     smeta_year: 'Жылы',
     smeta_amount: 'Сомасы',
+    active_version_amount: 'Белсенді нұсқаның қосынды сомасы',
+    current_status: 'Ағымдағы мәртебе',
+    plan_details: 'Сметаның атауы',
+    create_new_version_tooltip: 'Сметаның жаңа нұсқасын жасау',
+    confirm_create_version: 'Сіз жаңа нұсқаны жасағыңыз келетініне сенімдісіз бе',
+    versions_history: 'Нұсқалар тарихы',
+    version: 'Нұсқа',
+    status: 'Мәртебесі',
+    total_amount: 'Жалпы сомасы',
+    creation_date: 'Құрылған уақыт',
+    active: 'Белсенді',
 
     // SmetaForm
     smeta_form_title: '{year} жылға арналған сатып алу сметасы',
@@ -110,9 +134,11 @@ const translations = {
     ktp_applicable_label: 'КТП-дан сатып алу қолданыла ма',
     is_resident_label: 'ҚР резиденттігі',
      // StatusChip
-    status_draft: 'Жобалдық',
-    status_pre_approved: 'Алдын ала бекітілген',
-    status_approved: 'Бекітілген',
+    status_DRAFT: 'Жобалдық',
+    status_PRE_APPROVED: 'Алдын ала бекітілген',
+    status_APPROVED: 'Бекітілген',
+    // Errors
+    error_title: 'Қате',
   },
 };
 

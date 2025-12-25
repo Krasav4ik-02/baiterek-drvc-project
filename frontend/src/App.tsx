@@ -1,18 +1,32 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import SmetaForm from './pages/SmetaForm'; // Переименованный PlanForm
-import SmetaItemForm from './pages/SmetaItemForm'; // Новая форма для позиций
+import PlanForm from './pages/PlanForm';
+import PlanItemForm from './pages/PlanItemForm';
+
+// Приватный роут для защиты страниц
+const PrivateRoute = ({ children }: { children: JSX.Element }) => {
+  const isAuthenticated = !!localStorage.getItem('token');
+  return isAuthenticated ? children : <Navigate to="/login" />;
+};
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
+  const [token, setToken] = useState(localStorage.getItem('token'));
 
-  const isAuthenticated = !!token;
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setToken(localStorage.getItem('token'));
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   const handleSetToken = (newToken: string) => {
-    setToken(newToken);
     localStorage.setItem('token', newToken);
+    setToken(newToken);
   };
 
   return (
@@ -20,30 +34,26 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login setToken={handleSetToken} />} />
         
-        {/* Основные маршруты */}
+        {/* Защищенные маршруты */}
         <Route 
           path="/" 
-          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} 
+          element={<PrivateRoute><Dashboard /></PrivateRoute>} 
         />
         <Route 
-          path="/plans/:smetaId" 
-          element={isAuthenticated ? <SmetaForm /> : <Navigate to="/login" />} 
+          path="/plans/:planId" 
+          element={<PrivateRoute><PlanForm /></PrivateRoute>} 
         />
-        
-        {/* Маршруты для позиций сметы */}
         <Route 
-          path="/plans/:smetaId/items/new" 
-          element={isAuthenticated ? <SmetaItemForm /> : <Navigate to="/login" />} 
+          path="/plans/:planId/items/new" 
+          element={<PrivateRoute><PlanItemForm /></PrivateRoute>} 
         />
         <Route 
           path="/items/:itemId/edit" 
-          element={isAuthenticated ? <SmetaItemForm /> : <Navigate to="/login" />} 
+          element={<PrivateRoute><PlanItemForm /></PrivateRoute>} 
         />
 
-        {/* Redirect старых роутов */}
-        <Route path="/application/*" element={<Navigate to="/" />} />
-        <Route path="/plans/new" element={<Navigate to="/" />} /> {/* Создание сметы теперь в модалке */}
-
+        {/* Редирект на главную для всех остальных путей */}
+        <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>
   );
